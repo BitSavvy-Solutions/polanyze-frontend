@@ -20,14 +20,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
           
-      # ⚠️ IMPORTANT: If your package.json is inside a subfolder (e.g., polanyze-frontend),
-      # uncomment the 'working-directory' lines below.
       - name: Install dependencies
-        # working-directory: ./polanyze-frontend
+        # working-directory: ./polanyze-frontend # Uncomment if needed
         run: npm ci
         
       - name: Build Vite App
-        # working-directory: ./polanyze-frontend
+        # working-directory: ./polanyze-frontend # Uncomment if needed
         run: npm run build
         
       - name: Deploy to cPanel via SFTP
@@ -35,15 +33,17 @@ jobs:
         with:
           username: ${{ secrets.CPANEL_USERNAME }}
           server: ${{ secrets.CPANEL_HOST }}
-          port: 22
-          password: ${{ secrets.CPANEL_PASSWORD }}
           
-          # Vite builds to 'dist' by default (Gatsby uses 'public')
-          # If using a subfolder, change to './polanyze-frontend/dist/*'
+
+          
+          # ⚠️ CHANGE 2: Swapped 'password' for 'ssh_private_key'
+          # Make sure you added your new private key content to this Secret in GitHub
+          ssh_private_key: ${{ secrets.CPANEL_SSH_PRIVATE_KEY }}
+          
+          # Vite builds to 'dist' by default
           local_path: './dist/*' 
           
-          # Create a new secret for this specific folder path
-          # Example value: /home/youruser/public_html/polanyze.iverse.space/
+          # Your specific folder path secret
           remote_path: ${{ secrets.POLANYZE_REMOTE_PATH }}
           
           sftp_only: true
