@@ -1,0 +1,49 @@
+name: Deploy Polanyze to cPanel
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          cache: 'npm'
+          
+      # ⚠️ IMPORTANT: If your package.json is inside a subfolder (e.g., polanyze-frontend),
+      # uncomment the 'working-directory' lines below.
+      - name: Install dependencies
+        # working-directory: ./polanyze-frontend
+        run: npm ci
+        
+      - name: Build Vite App
+        # working-directory: ./polanyze-frontend
+        run: npm run build
+        
+      - name: Deploy to cPanel via SFTP
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          username: ${{ secrets.CPANEL_USERNAME }}
+          server: ${{ secrets.CPANEL_HOST }}
+          port: 22
+          password: ${{ secrets.CPANEL_PASSWORD }}
+          
+          # Vite builds to 'dist' by default (Gatsby uses 'public')
+          # If using a subfolder, change to './polanyze-frontend/dist/*'
+          local_path: './dist/*' 
+          
+          # Create a new secret for this specific folder path
+          # Example value: /home/youruser/public_html/polanyze.iverse.space/
+          remote_path: ${{ secrets.POLANYZE_REMOTE_PATH }}
+          
+          sftp_only: true
