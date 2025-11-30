@@ -1,219 +1,381 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Scale, 
-  Search, 
-  ShieldCheck, 
-  FileText, 
-  ArrowRight, 
-  CheckCircle2, 
-  AlertCircle,
-  Upload
+  Search, FileText, Globe, Building2, ArrowRight, 
+  Server, ShieldCheck, ChevronRight, MessageSquare, 
+  ArrowLeft, Filter, MapPin
 } from 'lucide-react';
-import { motion } from 'framer-motion';
-import './App.css';
+import { setApiEnv, searchPolicies, askDocument } from './api';
+
+// --- MOCK DATA FOR "BROWSE" VIEW (Until we add GET /documents endpoint) ---
+const MOCK_DOCS = [
+  { id: 'canada-federal-excise', title: 'Canada Excise Tax Act 2024', country: 'Canada', entity: 'Federal', sector: 'Finance' },
+  { id: 'ontario-remote-work', title: 'Ontario Remote Work Standards', country: 'Canada', entity: 'Provincial', province: 'Ontario', sector: 'Technology' },
+  { id: 'eu-ai-act', title: 'EU AI Act (Draft)', country: 'European Union', entity: 'Union', sector: 'Technology' }, // Future proofing example
+];
 
 function App() {
-  // State for the "Interactive Demo" section
-  const [query, setQuery] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [demoResult, setDemoResult] = useState(null);
+  // --- STATE ---
+  const [env, setEnv] = useState('PROD'); // 'PROD' or 'LOCAL'
+  const [view, setView] = useState('home'); // 'home', 'browse', 'chat'
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const handleDemoSearch = (e) => {
-    e.preventDefault();
-    if (!query) return;
-    
-    setIsAnalyzing(true);
-    setDemoResult(null);
-    
-    // Simulate API call delay
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      setDemoResult({
-        answer: "According to Section 4.2, your data may be shared with third-party affiliates, but it cannot be sold to external advertisers without explicit consent.",
-        citation: "Section 4.2: Data Sharing & Privacy",
-        highlight: "The Company reserves the right to share user data with affiliated partners. However, strictly no personal data shall be sold to unaffiliated third parties."
-      });
-    }, 1500);
+  // Chat State
+  const [selectedDoc, setSelectedDoc] = useState(null);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
+
+  // Filters
+  const [filters, setFilters] = useState({ country: 'All', province: 'All' });
+
+  // --- HANDLERS ---
+
+  const toggleEnv = () => {
+    const newEnv = env === 'PROD' ? 'LOCAL' : 'PROD';
+    setEnv(newEnv);
+    setApiEnv(newEnv);
   };
 
-  return (
-    <div className="min-h-screen flex flex-col font-sans text-slate-900 bg-slate-50">
+  const handleGlobalSearch = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    try {
+      const data = await searchPolicies(searchQuery);
+      // The backend returns { matches: [...] }
+      setSearchResults(data.matches || []);
+    } catch (err) {
+      alert("Failed to connect to backend. Check console.");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleDocSelect = (doc) => {
+    setSelectedDoc(doc);
+    setChatHistory([]); // Reset chat
+    setView('chat');
+  };
+
+  const handleDocChat = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const userMsg = { role: 'user', text: chatInput };
+    setChatHistory(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsChatting(true);
+
+    try {
+      // The backend returns { analysis: [...] }
+      const data = await askDocument(selectedDoc.id, userMsg.text);
       
-      {/* --- NAVIGATION --- */}
-      <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-gov-900 p-2 rounded-lg">
-              <Scale className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-xl tracking-tight text-gov-900">Polanyze</span>
-          </div>
-          <div className="hidden md:flex gap-8 text-sm font-medium text-slate-600">
-            <a href="#problem" className="hover:text-gov-600 transition-colors">The Challenge</a>
-            <a href="#demo" className="hover:text-gov-600 transition-colors">Live Demo</a>
-            <a href="#impact" className="hover:text-gov-600 transition-colors">G7 Impact</a>
-          </div>
-          <button className="bg-gov-900 text-white px-5 py-2 rounded-full text-sm font-semibold hover:bg-gov-800 transition-colors">
-            Get Started
-          </button>
-        </div>
-      </nav>
+      // Format the AI response based on the Graph Ontology
+      const analysis = data.analysis && data.analysis[0];
+      let aiText = "I couldn't find relevant information in this document.";
+      let metadata = null;
 
-      {/* --- HERO SECTION --- */}
-      <section className="relative pt-20 pb-32 overflow-hidden bg-gradient-to-b from-slate-50 to-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-gov-600 text-xs font-bold tracking-wide mb-6 uppercase">
-              <ShieldCheck className="w-3 h-3" /> G7 GovAI Grand Challenge Entrant
-            </div>
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 mb-6 leading-tight">
-              Policy clarity,   
+      if (analysis) {
+        aiText = analysis.text;
+        metadata = {
+          section: analysis.section_title,
+          type: analysis.legal_type,
+          subject: analysis.subject,
+          topics: analysis.related_topics
+        };
+      }
 
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-gov-600 to-gov-900">
-                without the hallucination.
-              </span>
-            </h1>
-            <p className="mt-6 text-xl text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed">
-              We use AI to navigate complex government regulations and consumer policies. 
-              We don't just generate answers; we <strong>cite the source</strong>.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <a href="#demo" className="flex items-center justify-center gap-2 bg-gov-900 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-gov-800 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1">
-                Try the Prototype <ArrowRight className="w-5 h-5" />
-              </a>
-              <button className="px-8 py-4 rounded-xl font-bold text-lg text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-all">
-                Read the Whitepaper
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      </section>
+      setChatHistory(prev => [...prev, { role: 'ai', text: aiText, metadata }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Error communicating with the Knowledge Graph." }]);
+    } finally {
+      setIsChatting(false);
+    }
+  };
 
-      {/* --- INTERACTIVE DEMO SECTION (The Core Feature) --- */}
-      <section id="demo" className="py-20 bg-slate-50 border-y border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-slate-900">See Polanyze in Action</h2>
-            <p className="text-slate-600 mt-2">Upload a policy document or use our sample to ask questions.</p>
+  // --- RENDER HELPERS ---
+
+  const filteredDocs = MOCK_DOCS.filter(doc => {
+    if (filters.country !== 'All' && doc.country !== filters.country) return false;
+    if (filters.province !== 'All' && doc.province !== filters.province) return false;
+    return true;
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      
+      {/* --- HEADER --- */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <div className="bg-blue-900 p-1.5 rounded">
+              <ShieldCheck className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-bold text-xl tracking-tight text-slate-900">Polanyze</span>
           </div>
 
-          {/* The App Interface Mockup */}
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col md:flex-row h-[600px]">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setView('browse')}
+              className={`text-sm font-medium px-3 py-2 rounded-md transition-colors ${view === 'browse' ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Browse Policies
+            </button>
             
-            {/* LEFT: Document Viewer */}
-            <div className="w-full md:w-1/2 bg-slate-100 border-r border-slate-200 p-6 overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <FileText className="w-4 h-4" /> Terms_of_Service_v2.pdf
-                </div>
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Indexed</span>
+            {/* Environment Toggle */}
+            <button 
+              onClick={toggleEnv}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                env === 'LOCAL' 
+                  ? 'bg-green-50 border-green-200 text-green-700' 
+                  : 'bg-blue-50 border-blue-200 text-blue-700'
+              }`}
+            >
+              <Server className="w-3 h-3" />
+              {env === 'LOCAL' ? 'Localhost:7071' : 'Azure Cloud'}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* --- MAIN CONTENT --- */}
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        
+        {/* VIEW: HOME / SEARCH */}
+        {view === 'home' && (
+          <div className="max-w-3xl mx-auto mt-12">
+            <div className="text-center mb-10">
+              <h1 className="text-4xl font-extrabold text-slate-900 mb-4">
+                Compliance Intelligence for B2B
+              </h1>
+              <p className="text-lg text-slate-600">
+                Search across Federal and Provincial regulations using our Knowledge Graph.
+              </p>
+            </div>
+
+            {/* Search Bar */}
+            <form onSubmit={handleGlobalSearch} className="relative mb-12">
+              <div className="relative">
+                <Search className="absolute left-4 top-4 text-slate-400 w-6 h-6" />
+                <input 
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="e.g., 'What are the tax obligations for SaaS in Ontario?'"
+                  className="w-full pl-14 pr-4 py-4 text-lg rounded-xl border border-slate-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                />
+                <button 
+                  type="submit"
+                  disabled={isSearching}
+                  className="absolute right-2 top-2 bottom-2 bg-blue-900 text-white px-6 rounded-lg font-medium hover:bg-blue-800 transition-colors disabled:opacity-50"
+                >
+                  {isSearching ? 'Analyzing...' : 'Search'}
+                </button>
+              </div>
+            </form>
+
+            {/* Search Results */}
+            {searchResults.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Relevant Documents Found</h3>
+                {searchResults.map((result, idx) => (
+                  <div 
+                    key={idx} 
+                    onClick={() => handleDocSelect({ id: result.id, title: result.title })}
+                    className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 cursor-pointer transition-all group"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-bold text-lg text-blue-900 group-hover:text-blue-700 mb-1">
+                          {result.title}
+                        </h4>
+                        <p className="text-sm text-slate-500 line-clamp-2 mb-3">
+                          "...{result.best_match_snippet}..."
+                        </p>
+                        <div className="flex gap-2">
+                          <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded font-medium">
+                            Relevance: {(result.score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronRight className="text-slate-300 group-hover:text-blue-500" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VIEW: BROWSE */}
+        {view === 'browse' && (
+          <div>
+            <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Policy Library</h2>
+                <p className="text-slate-600">Browse indexed regulations by jurisdiction.</p>
               </div>
               
-              {/* Mock Document Content */}
-              <div className="bg-white p-8 shadow-sm min-h-[500px] text-xs text-slate-500 leading-relaxed font-mono">
-                <p className="mb-4">1. INTRODUCTION</p>
-                <p className="mb-4">Welcome to the service. By using this platform, you agree to the following terms...</p>
-                <p className="mb-4">4. DATA PRIVACY & USAGE</p>
-                <p className="mb-4">4.1 Collection. We collect data necessary for the operation of the service.</p>
-                
-                {/* Highlighted Section Logic */}
-                <div className={`transition-colors duration-500 p-1 rounded ${demoResult ? 'bg-yellow-100 border-l-4 border-yellow-400 text-slate-800' : ''}`}>
-                  <p className="font-bold">4.2 Sharing with Third Parties.</p>
-                  <p>The Company reserves the right to share user data with affiliated partners. However, strictly no personal data shall be sold to unaffiliated third parties.</p>
+              {/* Filters */}
+              <div className="flex gap-3">
+                <div className="relative">
+                  <Globe className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <select 
+                    className="pl-9 pr-8 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
+                    value={filters.country}
+                    onChange={(e) => setFilters({...filters, country: e.target.value})}
+                  >
+                    <option value="All">All Countries</option>
+                    <option value="Canada">Canada</option>
+                    <option value="USA">USA</option>
+                    <option value="European Union">European Union</option>
+                  </select>
                 </div>
-                
-                <p className="mt-4">4.3 Retention. Data is retained for 5 years...</p>
-                <p className="mt-4">5. TERMINATION. We may terminate access at any time...</p>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <select 
+                    className="pl-9 pr-8 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
+                    value={filters.province}
+                    onChange={(e) => setFilters({...filters, province: e.target.value})}
+                  >
+                    <option value="All">All Regions</option>
+                    <option value="Ontario">Ontario</option>
+                    <option value="British Columbia">British Columbia</option>
+                    <option value="California">California</option>
+                  </select>
+                </div>
               </div>
             </div>
 
-            {/* RIGHT: Chat/Query Interface */}
-            <div className="w-full md:w-1/2 flex flex-col">
-              
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredDocs.map((doc) => (
+                <div 
+                  key={doc.id}
+                  onClick={() => handleDocSelect(doc)}
+                  className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer flex flex-col h-full"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="bg-blue-50 p-2 rounded-lg">
+                      <FileText className="w-6 h-6 text-blue-700" />
+                    </div>
+                    <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase">
+                      {doc.entity}
+                    </span>
+                  </div>
+                  <h3 className="font-bold text-lg text-slate-900 mb-2">{doc.title}</h3>
+                  <div className="mt-auto space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <Globe className="w-4 h-4" /> {doc.country}
+                    </div>
+                    {doc.province && (
+                      <div className="flex items-center gap-2 text-sm text-slate-500">
+                        <MapPin className="w-4 h-4" /> {doc.province}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <Building2 className="w-4 h-4" /> {doc.sector}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: CHAT (Deep Dive) */}
+        {view === 'chat' && selectedDoc && (
+          <div className="h-[calc(100vh-8rem)] flex flex-col">
+            <div className="mb-4 flex items-center gap-4">
+              <button 
+                onClick={() => setView('home')}
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <ArrowLeft className="w-5 h-5 text-slate-600" />
+              </button>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  {selectedDoc.title}
+                </h2>
+                <p className="text-sm text-slate-500">Ask specific questions to extract ontology-backed answers.</p>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
               {/* Chat History */}
-              <div className="flex-grow p-6 bg-white overflow-y-auto">
-                {!demoResult && !isAnalyzing && (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center">
-                    <Search className="w-12 h-12 mb-4 opacity-20" />
-                    <p>Ask a question about the document on the left.</p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      <button 
-                        onClick={() => setQuery("Can you sell my data?")}
-                        className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full transition-colors"
-                      >
-                        "Can you sell my data?"
-                      </button>
-                      <button 
-                        onClick={() => setQuery("What is the termination policy?")}
-                        className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full transition-colors"
-                      >
-                        "Termination policy?"
-                      </button>
-                    </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+                {chatHistory.length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                    <MessageSquare className="w-12 h-12 mb-4 opacity-20" />
+                    <p>Start analyzing this document.</p>
                   </div>
                 )}
-
-                {isAnalyzing && (
-                  <div className="flex flex-col items-center justify-center h-full space-y-4">
-                    <div className="w-8 h-8 border-4 border-gov-200 border-t-gov-600 rounded-full animate-spin"></div>
-                    <p className="text-sm text-slate-500 animate-pulse">Analyzing semantic vectors...</p>
+                
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl p-4 ${
+                      msg.role === 'user' 
+                        ? 'bg-blue-900 text-white rounded-tr-none' 
+                        : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none shadow-sm'
+                    }`}>
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                      
+                      {/* Ontology Metadata Card */}
+                      {msg.metadata && (
+                        <div className="mt-4 pt-3 border-t border-slate-100">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="bg-slate-50 p-2 rounded">
+                              <span className="block text-slate-400 font-bold uppercase text-[10px]">Section</span>
+                              <span className="font-semibold text-blue-700">{msg.metadata.section}</span>
+                            </div>
+                            <div className="bg-slate-50 p-2 rounded">
+                              <span className="block text-slate-400 font-bold uppercase text-[10px]">Type</span>
+                              <span className={`font-semibold ${msg.metadata.type === 'Obligation' ? 'text-red-600' : 'text-green-600'}`}>
+                                {msg.metadata.type}
+                              </span>
+                            </div>
+                            <div className="bg-slate-50 p-2 rounded col-span-2">
+                              <span className="block text-slate-400 font-bold uppercase text-[10px]">Subject</span>
+                              <span className="font-semibold text-slate-700">{msg.metadata.subject}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-
-                {demoResult && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-6"
-                  >
-                    {/* User Question */}
-                    <div className="flex justify-end">
-                      <div className="bg-gov-900 text-white px-4 py-2 rounded-2xl rounded-tr-none max-w-[80%] text-sm">
-                        {query}
+                ))}
+                {isChatting && (
+                  <div className="flex justify-start">
+                    <div className="bg-white border border-slate-200 p-4 rounded-2xl rounded-tl-none shadow-sm">
+                      <div className="flex gap-1">
+                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75"></div>
+                        <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150"></div>
                       </div>
                     </div>
-
-                    {/* AI Response */}
-                    <div className="flex justify-start">
-                      <div className="bg-slate-100 text-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[90%] text-sm shadow-sm border border-slate-200">
-                        <div className="flex items-center gap-2 mb-2 text-gov-700 font-bold text-xs uppercase tracking-wider">
-                          <CheckCircle2 className="w-4 h-4" /> Verified Answer
-                        </div>
-                        <p className="mb-3">{demoResult.answer}</p>
-                        
-                        {/* Citation Card */}
-                        <div className="bg-white border border-slate-200 rounded p-3 text-xs">
-                          <div className="font-semibold text-slate-900 mb-1 flex items-center gap-1">
-                            <Search className="w-3 h-3" /> Source Found:
-                          </div>
-                          <p className="italic text-slate-600">"{demoResult.highlight}"</p>
-                          <div className="mt-2 text-gov-600 font-medium cursor-pointer hover:underline">
-                            Go to {demoResult.citation} &rarr;
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
+                  </div>
                 )}
               </div>
 
               {/* Input Area */}
-              <div className="p-4 border-t border-slate-100 bg-slate-50">
-                <form onSubmit={handleDemoSearch} className="relative">
+              <div className="p-4 bg-white border-t border-slate-200">
+                <form onSubmit={handleDocChat} className="relative">
                   <input 
-                    type="text" 
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Ask a question about this policy..."
-                    className="w-full pl-4 pr-12 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-gov-500 focus:border-transparent outline-none shadow-sm"
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Ask about obligations, rights, or definitions..."
+                    className="w-full pl-4 pr-12 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   <button 
                     type="submit"
-                    className="absolute right-2 top-2 bg-gov-900 text-white p-1.5 rounded-lg hover:bg-gov-700 transition-colors"
+                    disabled={isChatting}
+                    className="absolute right-2 top-2 bg-blue-600 text-white p-1.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
                     <ArrowRight className="w-5 h-5" />
                   </button>
@@ -221,59 +383,9 @@ function App() {
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        )}
 
-      {/* --- FEATURES / RSL ALIGNMENT --- */}
-      <section id="problem" className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-3 gap-12">
-            <div className="space-y-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-gov-600">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold">Reduce Cognitive Load</h3>
-              <p className="text-slate-600">
-                Citizens are overwhelmed by legalese. We translate complex RSL #2 problem statements into plain language instantly.
-              </p>
-            </div>
-            <div className="space-y-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-gov-600">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold">Zero Hallucinations</h3>
-              <p className="text-slate-600">
-                Unlike standard LLMs, Polanyze uses RAG (Retrieval Augmented Generation) to strictly ground answers in the provided text.
-              </p>
-            </div>
-            <div className="space-y-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-gov-600">
-                <Upload className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-bold">Universal Ingestion</h3>
-              <p className="text-slate-600">
-                Upload PDFs, XML, or paste URLs. We parse government acts and consumer policies alike.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --- FOOTER --- */}
-      <footer className="bg-slate-900 text-slate-400 py-12 border-t border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center">
-          <div className="mb-4 md:mb-0">
-            <div className="flex items-center gap-2 mb-2">
-              <Scale className="w-5 h-5 text-white" />
-              <span className="text-white font-bold text-lg">Polanyze</span>
-            </div>
-            <p className="text-sm">Built for the G7 GovAI Grand Challenge 2025.</p>
-          </div>
-          <div className="text-sm">
-            &copy; 2025 Polanyze Team. All rights reserved.
-          </div>
-        </div>
-      </footer>
+      </main>
     </div>
   );
 }
