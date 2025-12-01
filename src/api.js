@@ -6,7 +6,6 @@ export const API_CONFIG = {
   LOCAL: 'http://localhost:7071/api'
 };
 
-// Default to PROD, but we will allow the UI to change this
 let currentBaseUrl = API_CONFIG.PROD;
 
 export const setApiEnv = (env) => {
@@ -14,29 +13,35 @@ export const setApiEnv = (env) => {
   console.log(`Switched API to: ${currentBaseUrl}`);
 };
 
-export const getApiEnv = () => currentBaseUrl;
-
 // --- API CALLS ---
 
 export const searchPolicies = async (question) => {
+  const response = await axios.post(`${currentBaseUrl}/query_policy`, { question });
+  return response.data;
+};
+
+export const askDocument = async (docId, question) => {
+  const response = await axios.post(`${currentBaseUrl}/query_document_details`, { 
+    doc_id: docId, 
+    question 
+  });
+  return response.data;
+};
+
+// NEW: Ingest Policy
+export const ingestPolicy = async (formData) => {
   try {
-    const response = await axios.post(`${currentBaseUrl}/query_policy`, { question });
+    // formData should match the Python ingest_policy req_body structure
+    const response = await axios.post(`${currentBaseUrl}/ingest_policy`, formData);
     return response.data;
   } catch (error) {
-    console.error("Search Error:", error);
+    console.error("Ingest Error:", error);
     throw error;
   }
 };
 
-export const askDocument = async (docId, question) => {
-  try {
-    const response = await axios.post(`${currentBaseUrl}/query_document_details`, { 
-      doc_id: docId, 
-      question 
-    });
-    return response.data;
-  } catch (error) {
-    console.error("Doc Query Error:", error);
-    throw error;
-  }
+// NEW: Mock Update (Since backend update endpoint wasn't provided)
+export const updatePolicy = async (docId, updatedData) => {
+  console.log(`Mocking update for ${docId}`, updatedData);
+  return new Promise((resolve) => setTimeout(resolve, 1000));
 };
