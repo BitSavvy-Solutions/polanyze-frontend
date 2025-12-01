@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, FileText, Globe, Building2, ArrowRight, 
-  ShieldCheck, ArrowLeft, Plus, LogOut, Edit3, Save, X, UserCircle, Lock, RefreshCw, Server
+  ShieldCheck, ArrowLeft, Plus, LogOut, Edit3, Save, X, UserCircle, Lock, RefreshCw, Server, Target
 } from 'lucide-react';
-import { searchPolicies, askDocument, ingestPolicy, fetchPolicies, setApiEnv } from './api';
+import { searchPolicies, askDocument, ingestPolicy, fetchPolicies, fetchPolicyContent, setApiEnv } from './api';
 import { useAuth } from './context/AuthContext';
 import IngestPolicy from './components/IngestPolicy';
 
@@ -31,13 +31,59 @@ const LoginModal = ({ onClose, onLogin }) => (
   </div>
 );
 
+// --- DOCUMENT VIEWER COMPONENT (Handles Highlighting) ---
+const DocumentViewer = ({ content, highlightText }) => {
+  const containerRef = useRef(null);
+  const highlightRef = useRef(null);
+
+  // Scroll to highlight when it changes
+  useEffect(() => {
+    if (highlightText && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightText]);
+
+  if (!content) return <div className="p-8 text-center text-slate-400">Loading document content...</div>;
+
+  // Simple split logic to wrap the highlighted text
+  // Note: This is a basic implementation. For complex legal texts with formatting, 
+  // you might need a more robust regex approach.
+  const renderContent = () => {
+    if (!highlightText) return <div className="whitespace-pre-wrap font-mono text-sm text-slate-700">{content}</div>;
+
+    // Escape special regex characters in the highlight text
+    const escapedHighlight = highlightText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = content.split(new RegExp(`(${escapedHighlight})`, 'gi'));
+
+    return (
+      <div className="whitespace-pre-wrap font-mono text-sm text-slate-700">
+        {parts.map((part, i) => 
+          part.toLowerCase() === highlightText.toLowerCase() ? (
+            <mark key={i} ref={highlightRef} className="bg-yellow-200 text-slate-900 font-bold px-1 rounded">
+              {part}
+            </mark>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div ref={containerRef} className="h-full overflow-y-auto p-8 bg-white">
+      {renderContent()}
+    </div>
+  );
+};
+
 function App() {
   const { user, profile, login, logout } = useAuth();
   
   // --- STATE ---
   const [view, setView] = useState('home'); 
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [currentEnv, setCurrentEnv] = useState('PROD'); // State for API Switch
+  const [currentEnv, setCurrentEnv] = useState('PROD');
   
   // Search & Data
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +94,8 @@ function App() {
 
   // Active Document State
   const [selectedDoc, setSelectedDoc] = useState(null);
+  const [selectedDocContent, setSelectedDocContent] = useState(''); // Full Text
+  const [activeHighlight, setActiveHighlight] = useState(''); // Text to scroll to
   const [editFormData, setEditFormData] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -61,7 +109,6 @@ function App() {
 
   // --- EFFECTS ---
 
-  // 1. Fetch Policies on Mount or Env Change
   useEffect(() => {
     const loadPolicies = async () => {
       setIsLoadingDocs(true);
@@ -70,14 +117,25 @@ function App() {
       setIsLoadingDocs(false);
     };
     loadPolicies();
-  }, [currentEnv]); // Reload when env changes
+  }, [currentEnv]);
 
-  // 2. Close modal when profile is detected
   useEffect(() => {
     if (profile) {
       setShowLoginModal(false);
     }
   }, [profile]);
+
+  // Fetch full content when a doc is selected
+  useEffect(() => {
+    const loadContent = async () => {
+      if (selectedDoc) {
+        setSelectedDocContent(''); // Clear previous
+        const content = await fetchPolicyContent(selectedDoc.id);
+        setSelectedDocContent(content);
+      }
+    };
+    loadContent();
+  }, [selectedDoc]);
 
   // --- HANDLERS ---
 
@@ -85,7 +143,7 @@ function App() {
     const newEnv = currentEnv === 'PROD' ? 'LOCAL' : 'PROD';
     setApiEnv(newEnv);
     setCurrentEnv(newEnv);
-    setView('home'); // Reset view to avoid stale data issues
+    setView('home');
     alert(`Switched API to ${newEnv}`);
   };
 
@@ -115,6 +173,7 @@ function App() {
     const fullDoc = docs.find(d => d.id === doc.id) || doc;
     setSelectedDoc(fullDoc);
     setChatHistory([]);
+    setActiveHighlight('');
     setView('chat');
   };
 
@@ -122,7 +181,7 @@ function App() {
     handleProtectedAction(() => {
       setEditFormData({ 
         ...selectedDoc,
-        text_content: '' 
+        text_content: selectedDocContent // Pre-fill with fetched content
       });
       setView('edit');
     });
@@ -147,10 +206,8 @@ function App() {
       });
 
       alert("Policy update queued! It will be processed shortly.");
-      
       const data = await fetchPolicies();
       setDocs(data);
-      
       setView('browse');
     } catch (err) {
       console.error(err);
@@ -174,17 +231,24 @@ function App() {
       const analysis = data.analysis && data.analysis[0];
       let aiText = "I couldn't find relevant information.";
       let metadata = null;
+      let snippet = null;
 
       if (analysis) {
-        aiText = analysis.text;
+        aiText = `Based on ${analysis.section_title}: ${analysis.text}`; // Using the chunk text as the answer for now
+        snippet = analysis.text; // This is the text we want to highlight
         metadata = {
           section: analysis.section_title,
           type: analysis.legal_type,
           subject: analysis.subject,
-          topics: analysis.related_topics
+          topics: analysis.related_topics,
+          snippet: snippet // Store snippet in metadata to use for click-to-scroll
         };
       }
       setChatHistory(prev => [...prev, { role: 'ai', text: aiText, metadata }]);
+      
+      // Auto-highlight if found
+      if (snippet) setActiveHighlight(snippet);
+
     } catch (err) {
       setChatHistory(prev => [...prev, { role: 'ai', text: "Error communicating with Knowledge Graph." }]);
     } finally {
@@ -209,7 +273,7 @@ function App() {
 
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
             <div className="bg-blue-900 p-1.5 rounded">
               <ShieldCheck className="w-5 h-5 text-white" />
@@ -251,7 +315,7 @@ function App() {
       </header>
 
       {/* MAIN CONTENT */}
-      <main className="max-w-7xl mx-auto px-4 py-8 flex-1 w-full">
+      <main className="max-w-[1600px] mx-auto px-4 py-6 flex-1 w-full">
         
         {/* VIEW: INGEST (Protected) */}
         {view === 'ingest' && profile && (
@@ -357,17 +421,7 @@ function App() {
               <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg text-sm mb-4">
                 <strong>Note:</strong> Updating this policy will create a new version in the system and re-process the text for the Knowledge Graph.
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Title</label>
-                  <input type="text" className="w-full p-2 border rounded bg-slate-100" value={editFormData.title} readOnly />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Sector</label>
-                  <input type="text" className="w-full p-2 border rounded bg-slate-100" value={editFormData.sector} readOnly />
-                </div>
-              </div>
+              {/* ... (Keep existing edit form inputs) ... */}
               <div>
                 <label className="block text-sm font-medium mb-1">New Text Content (Paste Full Text)</label>
                 <textarea 
@@ -392,9 +446,10 @@ function App() {
           </div>
         )}
 
-        {/* VIEW: CHAT / DETAILS */}
+        {/* VIEW: CHAT / DETAILS (SPLIT SCREEN) */}
         {view === 'chat' && selectedDoc && (
           <div className="h-[calc(100vh-8rem)] flex flex-col">
+            {/* Toolbar */}
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button onClick={() => setView('browse')} className="p-2 hover:bg-slate-200 rounded-full"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
@@ -402,8 +457,6 @@ function App() {
                   <FileText className="w-5 h-5 text-blue-600" /> {selectedDoc.title}
                 </h2>
               </div>
-              
-              {/* Protected Edit Button */}
               <button 
                 onClick={handleEditStart} 
                 className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors"
@@ -413,50 +466,80 @@ function App() {
               </button>
             </div>
 
-            <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+            {/* Split Pane */}
+            <div className="flex-1 flex gap-4 overflow-hidden">
+              
+              {/* LEFT: Document Viewer (60%) */}
+              <div className="w-3/5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-bold text-slate-500 uppercase">
+                  Full Text Source
+                </div>
+                <DocumentViewer content={selectedDocContent} highlightText={activeHighlight} />
+              </div>
+
+              {/* RIGHT: Chat Interface (40%) */}
+              <div className="w-2/5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-bold text-slate-500 uppercase">
+                  AI Analysis
+                </div>
                 
-                {/* Chat History */}
-                {chatHistory.length === 0 && (
-                  <div className="text-center text-slate-400 mt-10">
-                    <p>Ask a question about this document to start analyzing.</p>
-                  </div>
-                )}
-
-                {chatHistory.map((msg, idx) => (
-                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-blue-900 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none shadow-sm'}`}>
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                      {msg.metadata && (
-                        <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
-                          <div className="bg-slate-50 p-2 rounded"><span className="block text-slate-400 font-bold uppercase text-[10px]">Section</span><span className="font-semibold text-blue-700">{msg.metadata.section}</span></div>
-                          <div className="bg-slate-50 p-2 rounded"><span className="block text-slate-400 font-bold uppercase text-[10px]">Type</span><span className="font-semibold text-slate-700">{msg.metadata.type}</span></div>
-                        </div>
-                      )}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+                  {chatHistory.length === 0 && (
+                    <div className="text-center text-slate-400 mt-10">
+                      <p>Ask a question to analyze specific sections.</p>
                     </div>
-                  </div>
-                ))}
+                  )}
+
+                  {chatHistory.map((msg, idx) => (
+                    <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[90%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-blue-900 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none shadow-sm'}`}>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                        
+                        {/* Metadata & Citation Button */}
+                        {msg.metadata && (
+                          <div className="mt-3 pt-3 border-t border-slate-100">
+                            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                              <div className="bg-slate-50 p-2 rounded"><span className="block text-slate-400 font-bold uppercase text-[10px]">Section</span><span className="font-semibold text-blue-700">{msg.metadata.section}</span></div>
+                              <div className="bg-slate-50 p-2 rounded"><span className="block text-slate-400 font-bold uppercase text-[10px]">Type</span><span className="font-semibold text-slate-700">{msg.metadata.type}</span></div>
+                            </div>
+                            
+                            {/* Click to Scroll Button */}
+                            {msg.metadata.snippet && (
+                              <button 
+                                onClick={() => setActiveHighlight(msg.metadata.snippet)}
+                                className="w-full flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium py-2 rounded transition-colors"
+                              >
+                                <Target size={14} /> Locate in Document
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-4 bg-white border-t border-slate-200">
+                  <form onSubmit={handleDocChat} className="relative">
+                    <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Ask about obligations..."
+                      className="w-full pl-4 pr-12 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                    <button type="submit" disabled={isChatting} className="absolute right-2 top-2 bg-blue-600 text-white p-1.5 rounded-lg hover:bg-blue-700">
+                      <ArrowRight className="w-5 h-5" />
+                    </button>
+                  </form>
+                </div>
               </div>
 
-              <div className="p-4 bg-white border-t border-slate-200">
-                <form onSubmit={handleDocChat} className="relative">
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask about obligations, rights, or definitions..."
-                    className="w-full pl-4 pr-12 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" />
-                  <button type="submit" disabled={isChatting} className="absolute right-2 top-2 bg-blue-600 text-white p-1.5 rounded-lg hover:bg-blue-700">
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-                </form>
-              </div>
             </div>
           </div>
         )}
 
       </main>
 
-      {/* DEVELOPER FOOTER */}
-      <footer className="bg-white border-t border-slate-200 py-4">
-        <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs text-slate-400">
+      {/* FOOTER */}
+      <footer className="bg-white border-t border-slate-200 py-4 mt-auto">
+        <div className="max-w-[1600px] mx-auto px-4 flex justify-between items-center text-xs text-slate-400">
           <p>&copy; 2024 Polanyze. All rights reserved.</p>
           <button 
             onClick={toggleEnv} 

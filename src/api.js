@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export const API_CONFIG = {
-  PROD: 'https://polanyze-dev.azurewebsites.net/api',
+  PROD: 'https://polanyze-dev.azurewebsites.net/api', // Update with your actual URL
   LOCAL: 'http://localhost:7071/api'
 };
 
@@ -14,7 +14,6 @@ export const setApiEnv = (env) => {
 
 // --- API CALLS ---
 
-// NEW: Fetch all policies from backend
 export const fetchPolicies = async () => {
   try {
     const response = await axios.get(`${currentBaseUrl}/get_all_policies`);
@@ -22,6 +21,17 @@ export const fetchPolicies = async () => {
   } catch (error) {
     console.error("Error fetching policies:", error);
     return [];
+  }
+};
+
+// NEW: Fetch full text content
+export const fetchPolicyContent = async (seriesId) => {
+  try {
+    const response = await axios.post(`${currentBaseUrl}/get_policy_content`, { series_id: seriesId });
+    return response.data.content;
+  } catch (error) {
+    console.error("Error fetching content:", error);
+    return "";
   }
 };
 
@@ -38,11 +48,8 @@ export const askDocument = async (docId, question) => {
   return response.data;
 };
 
-// Ingest Policy (Used for both New and Edit/Update)
 export const ingestPolicy = async (formData) => {
   try {
-    // formData should match the Python ingest_policy req_body structure
-    // If formData contains 'series_id', the backend treats it as an update
     const response = await axios.post(`${currentBaseUrl}/ingest_policy`, formData);
     return response.data;
   } catch (error) {
