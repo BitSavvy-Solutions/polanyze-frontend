@@ -1,0 +1,7 @@
+<IfModule mod_headers.c>
+    # Allow Google Sign-In popups to communicate with the window
+    Header set Cross-Origin-Opener-Policy "same-origin-allow-popups"
+    
+    # Disable strict isolation so external resources (Google Scripts, SVGs) can load
+    Header set Cross-Origin-Embedder-Policy "unsafe-none"
+</IfModule>
