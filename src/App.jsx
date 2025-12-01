@@ -1,58 +1,55 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, FileText, Globe, Building2, ArrowRight, 
-  Server, ShieldCheck, ChevronRight, MessageSquare, 
-  ArrowLeft, MapPin, Plus, LogOut, Edit3, Save, X
+  ShieldCheck, ArrowLeft, Plus, LogOut, Edit3, Save, X, UserCircle, Lock, RefreshCw, Server
 } from 'lucide-react';
-import { setApiEnv, searchPolicies, askDocument, updatePolicy } from './api';
+import { searchPolicies, askDocument, ingestPolicy, fetchPolicies, setApiEnv } from './api';
 import { useAuth } from './context/AuthContext';
 import IngestPolicy from './components/IngestPolicy';
 
-// Extended Mock Data to support "View Content" simulation
-const MOCK_DOCS = [
-  { 
-    id: 'canada-federal-excise', 
-    title: 'Canada Excise Tax Act 2024', 
-    country: 'Canada', 
-    entity: 'Federal', 
-    sector: 'Finance',
-    content: "PART I - INSURANCE PREMIUMS TAX\n\n4 (1) Every person shall pay to Her Majesty in right of Canada a tax in respect of..."
-  },
-  { 
-    id: 'ontario-remote-work', 
-    title: 'Ontario Remote Work Standards', 
-    country: 'Canada', 
-    entity: 'Provincial', 
-    province: 'Ontario', 
-    sector: 'Technology',
-    content: "SECTION 1: DEFINITIONS\n\n'Remote work' refers to work performed from a location other than the employer's establishment..."
-  },
-  { 
-    id: 'eu-ai-act', 
-    title: 'EU AI Act (Draft)', 
-    country: 'European Union', 
-    entity: 'Union', 
-    sector: 'Technology',
-    content: "TITLE II - PROHIBITED ARTIFICIAL INTELLIGENCE PRACTICES\n\nArticle 5: The following artificial intelligence practices shall be prohibited..."
-  },
-];
+// --- LOGIN MODAL COMPONENT ---
+const LoginModal = ({ onClose, onLogin }) => (
+  <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+    <div className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full text-center border border-slate-200 relative animate-in fade-in zoom-in duration-200">
+      <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <X size={24} />
+      </button>
+      <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+        <Lock className="w-8 h-8 text-blue-600" />
+      </div>
+      <h2 className="text-2xl font-bold text-slate-900 mb-2">Authentication Required</h2>
+      <p className="text-slate-600 mb-8">You must be signed in to onboard new policies or edit existing regulations.</p>
+      
+      <button 
+        onClick={onLogin}
+        className="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-3 px-4 rounded-lg transition-all shadow-sm"
+      >
+        <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
+        Sign in with Google
+      </button>
+    </div>
+  </div>
+);
 
 function App() {
   const { user, profile, login, logout } = useAuth();
   
   // --- STATE ---
-  const [env, setEnv] = useState('PROD');
-  const [view, setView] = useState('home'); // 'home', 'browse', 'chat', 'ingest', 'edit'
+  const [view, setView] = useState('home'); 
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [currentEnv, setCurrentEnv] = useState('PROD'); // State for API Switch
   
   // Search & Data
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [docs, setDocs] = useState(MOCK_DOCS); // Local state for docs to allow editing
+  const [docs, setDocs] = useState([]); 
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
 
   // Active Document State
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Chat State
   const [chatHistory, setChatHistory] = useState([]);
@@ -62,12 +59,42 @@ function App() {
   // Filters
   const [filters, setFilters] = useState({ country: 'All', province: 'All' });
 
+  // --- EFFECTS ---
+
+  // 1. Fetch Policies on Mount or Env Change
+  useEffect(() => {
+    const loadPolicies = async () => {
+      setIsLoadingDocs(true);
+      const data = await fetchPolicies();
+      setDocs(data || []);
+      setIsLoadingDocs(false);
+    };
+    loadPolicies();
+  }, [currentEnv]); // Reload when env changes
+
+  // 2. Close modal when profile is detected
+  useEffect(() => {
+    if (profile) {
+      setShowLoginModal(false);
+    }
+  }, [profile]);
+
   // --- HANDLERS ---
 
   const toggleEnv = () => {
-    const newEnv = env === 'PROD' ? 'LOCAL' : 'PROD';
-    setEnv(newEnv);
+    const newEnv = currentEnv === 'PROD' ? 'LOCAL' : 'PROD';
     setApiEnv(newEnv);
+    setCurrentEnv(newEnv);
+    setView('home'); // Reset view to avoid stale data issues
+    alert(`Switched API to ${newEnv}`);
+  };
+
+  const handleProtectedAction = (action) => {
+    if (!profile) {
+      setShowLoginModal(true);
+    } else {
+      action();
+    }
   };
 
   const handleGlobalSearch = async (e) => {
@@ -85,7 +112,6 @@ function App() {
   };
 
   const handleDocSelect = (doc) => {
-    // Find full doc details from our local state (simulating a GET /doc/:id)
     const fullDoc = docs.find(d => d.id === doc.id) || doc;
     setSelectedDoc(fullDoc);
     setChatHistory([]);
@@ -93,20 +119,45 @@ function App() {
   };
 
   const handleEditStart = () => {
-    setEditFormData({ ...selectedDoc });
-    setView('edit');
+    handleProtectedAction(() => {
+      setEditFormData({ 
+        ...selectedDoc,
+        text_content: '' 
+      });
+      setView('edit');
+    });
   };
 
   const handleEditSave = async () => {
-    // Update local state
-    const updatedDocs = docs.map(d => d.id === editFormData.id ? editFormData : d);
-    setDocs(updatedDocs);
-    setSelectedDoc(editFormData);
-    
-    // Call Mock API
-    await updatePolicy(editFormData.id, editFormData);
-    
-    setView('chat'); // Go back to view/chat mode
+    if (!editFormData.text_content) {
+      alert("Please provide the full text content to update the policy.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await ingestPolicy({
+        series_id: editFormData.id, 
+        title: editFormData.title,
+        country: editFormData.country,
+        entity: editFormData.entity,
+        sector: editFormData.sector,
+        province: editFormData.province || 'N/A',
+        text_content: editFormData.text_content
+      });
+
+      alert("Policy update queued! It will be processed shortly.");
+      
+      const data = await fetchPolicies();
+      setDocs(data);
+      
+      setView('browse');
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update policy.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDocChat = async (e) => {
@@ -141,29 +192,6 @@ function App() {
     }
   };
 
-  // --- LOGIN SCREEN ---
-  if (!profile) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md w-full text-center border border-slate-200">
-          <div className="bg-blue-900 w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Polanyze</h1>
-          <p className="text-slate-600 mb-8">Enterprise Compliance Intelligence Platform</p>
-          
-          <button 
-            onClick={() => login()}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-3 px-4 rounded-lg transition-all"
-          >
-            <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
-            Sign in with Google
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // --- MAIN APP ---
   const filteredDocs = docs.filter(doc => {
     if (filters.country !== 'All' && doc.country !== filters.country) return false;
@@ -172,8 +200,13 @@ function App() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
       
+      {/* LOGIN MODAL OVERLAY */}
+      {showLoginModal && (
+        <LoginModal onClose={() => setShowLoginModal(false)} onLogin={() => login()} />
+      )}
+
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -188,27 +221,40 @@ function App() {
             <button onClick={() => setView('browse')} className={`text-sm font-medium px-3 py-2 rounded-md ${view === 'browse' ? 'bg-slate-100 text-blue-700' : 'text-slate-600'}`}>
               Library
             </button>
-            <button onClick={() => setView('ingest')} className={`text-sm font-medium px-3 py-2 rounded-md flex items-center gap-1 ${view === 'ingest' ? 'bg-slate-100 text-blue-700' : 'text-slate-600'}`}>
+            
+            <button 
+              onClick={() => handleProtectedAction(() => setView('ingest'))} 
+              className={`text-sm font-medium px-3 py-2 rounded-md flex items-center gap-1 ${view === 'ingest' ? 'bg-slate-100 text-blue-700' : 'text-slate-600'}`}
+            >
               <Plus size={16} /> Onboard
             </button>
             
             <div className="h-6 w-px bg-slate-200 mx-2"></div>
 
-            <div className="flex items-center gap-3">
-              <img src={profile.picture} alt="User" className="w-8 h-8 rounded-full border border-slate-200" />
-              <button onClick={logout} className="text-slate-400 hover:text-red-600">
-                <LogOut size={18} />
+            {profile ? (
+              <div className="flex items-center gap-3">
+                <img src={profile.picture} alt="User" className="w-8 h-8 rounded-full border border-slate-200" />
+                <button onClick={logout} className="text-slate-400 hover:text-red-600" title="Logout">
+                  <LogOut size={18} />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowLoginModal(true)}
+                className="flex items-center gap-2 bg-blue-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors"
+              >
+                <UserCircle size={18} /> Sign In
               </button>
-            </div>
+            )}
           </div>
         </div>
       </header>
 
       {/* MAIN CONTENT */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 py-8 flex-1 w-full">
         
-        {/* VIEW: INGEST */}
-        {view === 'ingest' && (
+        {/* VIEW: INGEST (Protected) */}
+        {view === 'ingest' && profile && (
           <IngestPolicy onCancel={() => setView('home')} />
         )}
 
@@ -217,10 +263,10 @@ function App() {
           <div className="max-w-3xl mx-auto mt-12">
             <div className="text-center mb-10">
               <h1 className="text-4xl font-extrabold text-slate-900 mb-4">
-                Welcome, {profile.given_name}
+                Welcome, {profile ? profile.given_name : 'Guest'}
               </h1>
               <p className="text-lg text-slate-600">
-                Search across regulations or onboard new policies.
+                Search across regulations. {profile ? 'Manage your policies below.' : 'Sign in to manage policies.'}
               </p>
             </div>
 
@@ -267,55 +313,79 @@ function App() {
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredDocs.map((doc) => (
-                <div key={doc.id} onClick={() => handleDocSelect(doc)}
-                  className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer flex flex-col h-full">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="bg-blue-50 p-2 rounded-lg"><FileText className="w-6 h-6 text-blue-700" /></div>
-                    <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase">{doc.entity}</span>
-                  </div>
-                  <h3 className="font-bold text-lg text-slate-900 mb-2">{doc.title}</h3>
-                  <div className="mt-auto space-y-2 text-sm text-slate-500">
-                    <div className="flex items-center gap-2"><Globe className="w-4 h-4" /> {doc.country}</div>
-                    <div className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {doc.sector}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {isLoadingDocs ? (
+              <div className="text-center py-20 text-slate-500 flex flex-col items-center gap-2">
+                <RefreshCw className="animate-spin" /> Loading policies...
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredDocs.length === 0 ? (
+                  <p className="text-slate-500 col-span-3 text-center py-10">No policies found.</p>
+                ) : (
+                  filteredDocs.map((doc) => (
+                    <div key={doc.id} onClick={() => handleDocSelect(doc)}
+                      className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer flex flex-col h-full">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="bg-blue-50 p-2 rounded-lg"><FileText className="w-6 h-6 text-blue-700" /></div>
+                        <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase">{doc.entity}</span>
+                      </div>
+                      <h3 className="font-bold text-lg text-slate-900 mb-2">{doc.title}</h3>
+                      <div className="mt-auto space-y-2 text-sm text-slate-500">
+                        <div className="flex items-center gap-2"><Globe className="w-4 h-4" /> {doc.country}</div>
+                        <div className="flex items-center gap-2"><Building2 className="w-4 h-4" /> {doc.sector || 'General'}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {/* VIEW: EDIT */}
-        {view === 'edit' && editFormData && (
+        {/* VIEW: EDIT (Protected) */}
+        {view === 'edit' && editFormData && profile && (
           <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-              <h2 className="font-bold text-lg">Edit Policy</h2>
+              <h2 className="font-bold text-lg flex items-center gap-2">
+                <Edit3 size={20} className="text-blue-600"/> Update Policy Version
+              </h2>
               <div className="flex gap-2">
                 <button onClick={() => setView('chat')} className="p-2 hover:bg-slate-200 rounded text-slate-600"><X size={20}/></button>
               </div>
             </div>
             <div className="p-6 space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg text-sm mb-4">
+                <strong>Note:</strong> Updating this policy will create a new version in the system and re-process the text for the Knowledge Graph.
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Title</label>
-                  <input type="text" className="w-full p-2 border rounded" value={editFormData.title} 
-                    onChange={e => setEditFormData({...editFormData, title: e.target.value})} />
+                  <input type="text" className="w-full p-2 border rounded bg-slate-100" value={editFormData.title} readOnly />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Sector</label>
-                  <input type="text" className="w-full p-2 border rounded" value={editFormData.sector} 
-                    onChange={e => setEditFormData({...editFormData, sector: e.target.value})} />
+                  <input type="text" className="w-full p-2 border rounded bg-slate-100" value={editFormData.sector} readOnly />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Content</label>
-                <textarea rows={15} className="w-full p-2 border rounded font-mono text-sm" value={editFormData.content || ''} 
-                  onChange={e => setEditFormData({...editFormData, content: e.target.value})} />
+                <label className="block text-sm font-medium mb-1">New Text Content (Paste Full Text)</label>
+                <textarea 
+                  required
+                  rows={15} 
+                  className="w-full p-2 border rounded font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                  value={editFormData.text_content || ''} 
+                  onChange={e => setEditFormData({...editFormData, text_content: e.target.value})} 
+                  placeholder="Paste the updated legal text here..." 
+                />
               </div>
               <div className="flex justify-end">
-                <button onClick={handleEditSave} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                  <Save size={18} /> Save Changes
+                <button 
+                  onClick={handleEditSave} 
+                  disabled={isSaving}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isSaving ? 'Processing...' : <><Save size={18} /> Update & Re-Ingest</>}
                 </button>
               </div>
             </div>
@@ -332,20 +402,26 @@ function App() {
                   <FileText className="w-5 h-5 text-blue-600" /> {selectedDoc.title}
                 </h2>
               </div>
-              <button onClick={handleEditStart} className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors">
-                <Edit3 size={16} /> Edit Policy
+              
+              {/* Protected Edit Button */}
+              <button 
+                onClick={handleEditStart} 
+                className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors"
+              >
+                {profile ? <Edit3 size={16} /> : <Lock size={16} />} 
+                Update Policy
               </button>
             </div>
 
             <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
               <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
-                {/* Document Preview (Snippet) */}
-                <div className="bg-white p-4 rounded-lg border border-slate-200 mb-6">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Document Content Preview</h3>
-                  <p className="text-sm font-mono text-slate-600 whitespace-pre-wrap line-clamp-6">
-                    {selectedDoc.content || "No content available for preview."}
-                  </p>
-                </div>
+                
+                {/* Chat History */}
+                {chatHistory.length === 0 && (
+                  <div className="text-center text-slate-400 mt-10">
+                    <p>Ask a question about this document to start analyzing.</p>
+                  </div>
+                )}
 
                 {chatHistory.map((msg, idx) => (
                   <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -377,6 +453,20 @@ function App() {
         )}
 
       </main>
+
+      {/* DEVELOPER FOOTER */}
+      <footer className="bg-white border-t border-slate-200 py-4">
+        <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs text-slate-400">
+          <p>&copy; 2024 Polanyze. All rights reserved.</p>
+          <button 
+            onClick={toggleEnv} 
+            className="flex items-center gap-2 hover:text-blue-600 transition-colors bg-slate-50 px-3 py-1 rounded-full border border-slate-100"
+          >
+            <Server size={12} />
+            API: <span className={`font-bold ${currentEnv === 'LOCAL' ? 'text-green-600' : 'text-blue-600'}`}>{currentEnv}</span>
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

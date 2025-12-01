@@ -1,4 +1,3 @@
-// src/api.js
 import axios from 'axios';
 
 export const API_CONFIG = {
@@ -15,6 +14,17 @@ export const setApiEnv = (env) => {
 
 // --- API CALLS ---
 
+// NEW: Fetch all policies from backend
+export const fetchPolicies = async () => {
+  try {
+    const response = await axios.get(`${currentBaseUrl}/get_all_policies`);
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching policies:", error);
+    return [];
+  }
+};
+
 export const searchPolicies = async (question) => {
   const response = await axios.post(`${currentBaseUrl}/query_policy`, { question });
   return response.data;
@@ -28,20 +38,15 @@ export const askDocument = async (docId, question) => {
   return response.data;
 };
 
-// NEW: Ingest Policy
+// Ingest Policy (Used for both New and Edit/Update)
 export const ingestPolicy = async (formData) => {
   try {
     // formData should match the Python ingest_policy req_body structure
+    // If formData contains 'series_id', the backend treats it as an update
     const response = await axios.post(`${currentBaseUrl}/ingest_policy`, formData);
     return response.data;
   } catch (error) {
     console.error("Ingest Error:", error);
     throw error;
   }
-};
-
-// NEW: Mock Update (Since backend update endpoint wasn't provided)
-export const updatePolicy = async (docId, updatedData) => {
-  console.log(`Mocking update for ${docId}`, updatedData);
-  return new Promise((resolve) => setTimeout(resolve, 1000));
 };
